@@ -1,0 +1,52 @@
+name: Run Price Tracker Pipeline
+
+on:
+  schedule:
+    # Запуск 2 раза в день: в 05:00 UTC (08:00 по Киеву) и в 15:00 UTC (18:00 по Киеву)
+    - cron: '0 5,15 * * *'
+  workflow_dispatch: # Позволяет запускать вручную из веб-интерфейса GitHub
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install curl_cffi scikit-learn easyocr playwright matplotlib pillow requests
+        # Установка зависимостей браузера Playwright для ATB
+        playwright install --with-deps chromium
+
+    - name: Initialize Database
+      run: |
+        # Если база уже запушена в репозиторий, она просто обновится.
+        # Иначе создадим пустую с помощью флага --init
+        python run_pipeline.py --init
+
+    - name: Run Pipeline (Scrape, Analyze and Report)
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python run_pipeline.py
+
+    - name: Commit and Push Database changes
+      run: |
+        git config --global user.name "Github Actions Bot"
+        git config --global user.email "actions@github.com"
+        # Добавляем обновлённую базу данных
+        git add grocery_prices.db
+        git diff-index --quiet HEAD || git commit -m "chore: Auto-update price database [skip ci]"
+        git push origin main
